@@ -1,0 +1,388 @@
+---
+title: "Loan Prediction Problem "
+output:
+  html_document: default
+  pdf_document: default
+---
+### Kumar Akshaya & Ketkar Surendra Ganapat
+
+## 1.1 About Company
+
+### Dream Housing Finance company deals with all types of home loans. Their presence is seen across all urban, semi urban and rural areas. Customer first apply for home loan after that company validates the customer eligibility for loan.
+
+## 1.2 Problem
+
+### Company wants to automate the loan eligibility process (real time) based on customer detail provided while filling online application form. These details are Gender, Marital Status, Education, Number of Dependents, Income, Loan Amount, Credit History and others. To automate this process, they have given a problem to identify the customers segments, those are eligible for loan amount so that they can specifically target these customers. Here they have provided a partial data set.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### The data was collected from the Datahack, the train and test data was available at 
+
+https://datahack.analyticsvidhya.com/contest/practice-problem-loan-prediction-iii/
+
+
+## 1.3  Libraries: 
+
+```{r}
+#  Import required libraries required for working on the problem.
+
+library(woeBinning)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(ggpubr)
+library(formattable)
+library(gtools)
+library(scales)
+library(corrplot)
+library(caret)
+library(pROC)
+library(ROCR)
+library(tidyr)
+library(parallel)
+library(parallelMap)
+library(mlr)
+library(mice)
+library(ROCR)
+
+#library(caretEnsemble)
+
+library(DT)
+library(DMwR)
+library("ggplot2")
+library("tidyverse")
+library("missForest")
+library("ggcorrplot")
+
+```
+
+
+# 2.0 Description of the data.
+
+### In order to get an overview of the data and to undestand the data we first check the available data from our local directory using read.csv function, In order to understand the varibales present in the dataset we look at the summary of the data.
+
+```{r}
+
+setwd("C:/Users/Akshay/Desktop")
+tr<- read.csv('train_loan.csv', header = TRUE)
+
+#Data Overview 
+
+head(tr)
+summary(tr)
+str(tr)
+
+``` 
+
+# 3.0  Pre-processing of the data.
+
+### In order to work with data and to build up the models, cleaning the data is an important task, we start this process by idetifying the missing values and later we central impute these values to make sure that the dataset has 0 misisng values and is ready for analysis.
+
+```{r}
+
+#The first step is to identify the number of missing values present in the dataset.
+
+sum(is.na(tr))
+
+```
+
+```{r}
+
+#input missing values by package mice, considering that the missing values are not MNAR(missing not at random)
+
+library(DMwR)
+
+#data(tr)
+
+#impute the estimated missing values(dealing with the missing values)
+
+trimp<-centralImputation(tr)
+
+#check is there is no missing values, 0 was noted 
+sum(is.na(trimp)) 
+
+```
+
+# 4.0 Data Exploration
+
+### Here the variables such as Gender, Married, Dependents, Educatio, Self_Employed, Property_Area and Loan_Status are converted from character to factor.
+
+
+```{r}
+
+#Coversion factor function since the loan has to be a factor
+
+tr$Gender= factor(tr$Gender, levels= c('Female', 'Male'), labels=c(0,1))
+tr$Married= factor(tr$Married, levels= c('No', 'Yes'), labels=c(0,1))
+tr$Dependents= factor(tr$Dependents, levels= c('0', '1', '2', '3+'), labels=c(0,1, 2, 3))
+tr$Education= factor(tr$Education, levels= c('Graduate', 'Not Graduate'), labels=c(0,1))
+tr$Self_Employed= factor(tr$Self_Employed, levels= c('No', 'Yes'), labels=c(0,1))
+tr$Credit_History= factor(tr$Credit_History, levels= c('0', '1'), labels=c(0,1))
+tr$Property_Area= factor(tr$Property_Area, levels= c('Rural', 'Semiurban', 'Urban'), labels=c(0,1,2))
+tr$ApplicantIncome = as.numeric(tr$ApplicantIncome)
+tr$LoanAmount = as.numeric(tr$LoanAmount)
+tr$Loan_Amount_Term = as.numeric(tr$Loan_Amount_Term)
+tr$Loan_Status= factor(tr$Loan_Status, levels= c('N', 'Y'), labels=c(0,1))
+str(tr)
+
+
+
+```
+# 4.1 Feature Engineering 
+
+```{r}
+#To perform feature engineering we do the follwing:
+
+TI= tr$ApplicantIncome + tr$CoapplicantIncome
+tr = cbind(tr, TI)
+
+```
+
+```{r}
+
+#replacing NA values
+
+tr[tr == ""] <- NA
+
+```
+
+
+# 4.2 EDA by plotting graphs
+
+```{r}
+
+# To plot the factors
+
+plot_factor = function(data,xcol,ycol = "Loan_Status"){
+  temp.Data = data[,c(xcol,ycol)] %>% na.omit()
+  temp.Data = aggregate(temp.Data[,2], list(temp.Data[,1], temp.Data[,2]), FUN = length)
+  colnames(temp.Data) = c(xcol,ycol, "Freq")
+  
+  plot = ggplot(temp.Data, aes(x = temp.Data[,1], y = temp.Data[,3], fill = as.factor(temp.Data[,2]))) +
+    geom_bar(stat = "identity") +
+    theme_minimal(base_size = 18) +
+    scale_fill_discrete(name="Loan Status", labels = c("Rejected", "Approved")) +
+    labs(x = xcol, y = 'Freq') + theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12))
+
+  return(plot)
+}
+
+```
+
+# 4.3 Plot for the factor variables 
+
+```{r}
+
+# The graph 4 gives a plot for the gender vs the Loan Status, wherein 0 signifies female and 1 signifies male
+graph4 <- plot_factor(tr, xcol= "Gender", ycol = "Loan_Status")
+graph4
+
+#The graph 5 gives a plot for the varible married vs the Loan Status, wherein 0 signifies unmarried and 1 signifies married
+graph5 <- plot_factor(tr, xcol= "Married", ycol = "Loan_Status")
+graph5
+
+#The graph 6 gives a plot for the Dependents vs the Loan Status, wherein 0 signifies no dependents and 1 signifies single dependency followed by two, three etc.
+graph6 <- plot_factor(tr, xcol= "Dependents", ycol = "Loan_Status")
+graph6
+
+#The graph 7 gives a plot for the Education vs the Loan Status, wherein 0 signifies educated and 1 signifies uneducated
+graph7 <- plot_factor(tr, xcol= "Education", ycol = "Loan_Status")
+graph7
+
+#The graph 8 gives a plot for the Selfemployed vs the Loan Status, 
+graph8 <- plot_factor(tr, xcol= "Self_Employed", ycol = "Loan_Status")
+graph8
+
+#The graph 9 gives a plot for the Credit History vs the Loan Status, wherin 0 signifies feamle and 1 signifies male
+graph9 <- plot_factor(tr, xcol= "Credit_History", ycol = "Loan_Status")
+graph9
+
+#The graph 10 gives aplot for the Proerty Area vs the Loan Status, wherin 0 signifies feamle and 1 signifies male
+graph10 <- plot_factor(tr, xcol= "Property_Area", ycol = "Loan_Status")
+graph10
+
+
+```
+
+
+
+```{r}
+#Data Description: In order to get in an organized manner we use the function glimpse()
+
+glimpse(tr)
+
+```
+
+
+
+```{r}
+
+features<-colnames(tr)
+features_rel<-features[7:8] # radius_mean, texture_mean etc
+
+for( i in features_rel )
+  {p<-ggplot(tr,aes_string(x= i,fill="Loan_Status"))+geom_histogram(bins=50,alpha=0.8,colour='black')
+print(p)
+}
+
+graph11 <- tr %>% ggplot(aes(x = LoanAmount , y = Loan_Status)) + geom_histogram(stat = "identity")
+graph11
+```
+
+
+## 4.4 Normalization 
+
+```{r}
+# The goal of normalization is to change the values of numeric columns in the dataset to a common scale, without distorting differences in the ranges of values in order to make the mean 0 and standard deviation 1 we do normalisation.
+
+new_tr <- normalizeFeatures(tr,method = "standardize")
+summary(new_tr)
+```
+
+
+```{r}
+
+
+tr <- tr[,-1] 
+
+```
+
+## 5.0 Compute the corelation matrix.
+### In order to understand the relations between the variables we plot the correaltion matrix, the values of the corealtion matrix range in between +1 and -1.
+
+
+```{r}
+library(GGally)
+ggcorr(tr)
+
+```
+
+
+# 6.0 Prediction models
+
+
+```{r}
+
+set.seed(500)
+train_rows <- sample(1:nrow(tr), 0.7*nrow(trimp))
+train_data <- trimp[train_rows, ]
+validation_data <- trimp[-train_rows, ]
+
+```
+
+## 6.1 Logistic Regression Model
+
+```{r}
+library(caret)
+
+train_data=as.data.frame(train_data)
+validation_data=as.data.frame(validation_data)
+
+# na.omit(test_reg)
+# na.omit(train_reg)
+
+prop.table(table(trimp$Loan_Status))
+prop.table(table(train_data$Loan_Status))
+prop.table(table(validation_data$Loan_Status))
+
+```
+
+
+
+```{r}
+#Logistic regression model
+log_reg <- glm(Loan_Status ~ Credit_History + LoanAmount + Education + ApplicantIncome + Married + Self_Employed, data = train_data, family = binomial)
+
+summary(log_reg)
+predict<-predict(log_reg,type='response')
+
+#Misclassifcation rate
+table(train_data$Loan_Status,predict >0.1)
+
+ROCRpred<- prediction(predict,train_data$Loan_Status)
+perf<-ROCR::performance(ROCRpred,'tpr','fpr')
+plot(perf,colorize=TRUE, text.adj = c(-0.2,1.7))
+
+```
+
+
+#predicted values
+```{r}
+#pred = predict(log_reg, newdata=validation_data)
+#table(pred)
+
+
+#accuracy <- table(pred, validation_data)
+#sum(diag(accuracy))/sum(accuracy)
+
+```
+
+
+## 6.2 Random Forest Model
+```{r}
+
+
+table(train_data$Loan_Status)
+
+library(randomForest)
+
+```
+
+```{r}
+
+fitControl <- trainControl(method = "cv",number = 5,allowParallel = TRUE)
+rf_model1 <- caret::train(Loan_Status~ Credit_History + LoanAmount + Education + ApplicantIncome + Married + Self_Employed, data =train_data,method = "rf",trControl = fitControl)
+
+testPC = predict(rf_model1,validation_data[,-13])
+```
+
+
+```{r}
+#Test for accuracy 
+
+postResample(testPC, validation_data$Loan_Status)
+
+```
+
+## 6.3 Support Vector Machines Model
+
+
+```{r} 
+
+#Support Vector Machines Model
+
+set.seed(3033)
+
+train_data <- train_data[,-1] 
+
+trctrl <- caret::trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3233)
+
+svm_Linear <- caret::train(Loan_Status ~., data = train_data, method = "svmLinear", trControl=trctrl, preProcess = c("center", "scale"))
+
+print(svm_Linear)
+test_pred <- predict(svm_Linear, newdata = validation_data)
+test_pred
+
+
+```
+
+## 6.4 Gradient Boost Model
+
+```{r}
+
+#gradient boost model
+model_gbm <- caret::train(Loan_Status ~., data = train_data[,-1], method = "gbm", trControl = trctrl, preProcess = c("center","scale"))
+print(model_gbm)
+plot(model_gbm)
+res = predict(model_gbm, newdata = validation_data[,-1])
+
+```
+
+
+# 7.0 Results and Comparison
+
+### We have predicted four models it was seen that the accuracy obtained by gradient boost model was the highest, Since by default gbm model assumes 100 trees and the accuracy gets boosted. It was follwed by the SVM model with 0.81 and then Random forest and ultimately logistic regression model.
+
